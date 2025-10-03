@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,9 +44,26 @@ func ScanForJunk() []ScannerResult {
 		&xcodeSimulatorScanner,
 	}
 	results := []ScannerResult{}
+	var wg sync.WaitGroup
+	ch := make(chan []ScannerResult)
+
 	for _, s := range scanners {
-		results = append(results, s.scan()...)
+		wg.Add(1)
+		go func(s scanner) {
+			defer wg.Done()
+			ch <- s.scan()
+		}(s)
 	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for result := range ch {
+		results = append(results, result...)
+	}
+
 	return results
 }
 
@@ -163,49 +181,71 @@ func sizeFilter(size int64) filter {
 
 func (s *pathScannerWithFilter) scan() []ScannerResult {
 	var results []ScannerResult
+	var wg sync.WaitGroup
+	ch := make(chan ScannerResult)
 
 	for _, p := range s.paths {
-		entries, err := os.ReadDir(p)
-		if err != nil {
-			log.Printf("failed to read dir %s: %v", p, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			childPath := filepath.Join(p, entry.Name())
-			info, err := os.Stat(childPath)
+		wg.Add(1)
+		go func(p string) {
+			defer wg.Done()
+			entries, err := os.ReadDir(p)
 			if err != nil {
-				log.Printf("failed to stat path %s: %v", childPath, err)
-				continue
-			}
-			if !info.Mode().IsRegular() && !info.Mode().IsDir() {
-				continue
+				log.Printf("failed to read dir %s: %v", p, err)
+				return
 			}
 
-			r := ScannerResult{
-				Path:         childPath,
-				SizeKbs:      fetchDirSize(childPath),
-				ModifiedDate: info.ModTime(),
-				Reason:       s.reason,
-			}
-
-			passedAllFilters := true
-			for _, filter := range s.filters {
-				if !filter(r) {
-					passedAllFilters = false
-					break
+			for _, entry := range entries {
+				if r := s.processEntry(filepath.Join(p, entry.Name())); r != nil {
+					ch <- *r
 				}
 			}
+		}(p)
+	}
 
-			if passedAllFilters {
-				results = append(results, r)
-			}
-		}
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for result := range ch {
+		results = append(results, result)
 	}
 
 	return results
 }
 
+func (s *pathScannerWithFilter) processEntry(path string) *ScannerResult {
+	info, err := os.Stat(path)
+	if err != nil {
+		log.Printf("failed to stat path %s: %v", path, err)
+		return nil
+	}
+
+	var sizeKbs int64
+	if info.IsDir() {
+		sizeKbs = fetchDirSize(path)
+	} else if info.Mode().IsRegular() {
+		sizeKbs = info.Size() / 1024
+	} else {
+		return nil
+	}
+
+	r := ScannerResult{
+		Path:         path,
+		SizeKbs:      sizeKbs,
+		ModifiedDate: info.ModTime(),
+		Reason:       s.reason,
+	}
+
+	for _, filter := range s.filters {
+		if !filter(r) {
+			return nil
+		}
+	}
+	return &r
+}
+
+// Fetch dir size using `du`, which is faster than filepath.WalkDir()
 func fetchDirSize(path string) int64 {
 	// -k: output in KB
 	// -s: output the total size
