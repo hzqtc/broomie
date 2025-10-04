@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -37,7 +38,7 @@ func ScanForJunk() []ScannerResult {
 		&cacheScanner,
 		&logScanner,
 		&tempScanner,
-		// &deletedAppDataScanner,
+		&deletedAppDataScanner,
 		&leftOverUpdateDataScanner,
 		&iphoneBackupScanner,
 		&xcodeCacheScanner,
@@ -120,7 +121,8 @@ var (
 			filepath.Join(homeDir, "Library", "Preferences"),
 		},
 		filters: []filter{
-			// TODO: filter by deleted app
+			prefixExclusionFilter("com.apple."), // Exclude apple built-in apps
+			deletedAppDataFilter(),              // Only keep app data of deleted apps
 		},
 		reason: DeletedAppData,
 	}
@@ -130,7 +132,7 @@ var (
 			"/Library/Updates/",
 			"/macOS Install Data/",
 			filepath.Join(homeDir, "Library", "InstallerSandboxes"),
-			filepath.Join(homeDir, "iTunes", "iPhone Software Updates"),
+			filepath.Join(homeDir, "Library", "iTunes", "iPhone Software Updates"),
 		},
 		reason: LeftOverUpdateData,
 	}
@@ -177,6 +179,50 @@ func sizeFilter(size int64) filter {
 	return func(s ScannerResult) bool {
 		return s.SizeKbs >= size
 	}
+}
+
+func prefixExclusionFilter(prefix string) filter {
+	return func(s ScannerResult) bool {
+		return !strings.HasPrefix(filepath.Base(s.Path), prefix)
+	}
+}
+
+// Returns true if the ScannerResult belongs to a deleted app
+func deletedAppDataFilter() filter {
+	apps := getInstalledApps()
+	return func(s ScannerResult) bool {
+		for _, app := range apps {
+			if strings.Contains(filepath.Base(s.Path), app) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+func getInstalledApps() []string {
+	var paths = []string{
+		"/Applications",
+		filepath.Join(homeDir, "Applications"),
+	}
+	var apps []string
+	for _, root := range paths {
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !d.IsDir() {
+				return nil
+			}
+			if name, isApp := strings.CutSuffix(d.Name(), ".app"); isApp {
+				apps = append(apps, name)
+				// don't descend inside an .app bundle
+				return filepath.SkipDir
+			}
+			return nil
+		})
+	}
+	return apps
 }
 
 func (s *pathScannerWithFilter) scan() []ScannerResult {
