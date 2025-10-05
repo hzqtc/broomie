@@ -26,14 +26,15 @@ const (
 	XcodeSimulator     Reason = "Xcode Simulator"
 )
 
-type ScannerResult struct {
+type ScanResult struct {
+	Selected     bool
 	Path         string
-	SizeKbs      int64
+	Size         uint64
 	ModifiedDate time.Time
 	Reason       Reason
 }
 
-func ScanForJunk() []ScannerResult {
+func ScanForJunk() []ScanResult {
 	scanners := []scanner{
 		&cacheScanner,
 		&logScanner,
@@ -44,9 +45,9 @@ func ScanForJunk() []ScannerResult {
 		&xcodeCacheScanner,
 		&xcodeSimulatorScanner,
 	}
-	results := []ScannerResult{}
+	results := []ScanResult{}
 	var wg sync.WaitGroup
-	ch := make(chan []ScannerResult)
+	ch := make(chan []ScanResult)
 
 	for _, s := range scanners {
 		wg.Add(1)
@@ -69,7 +70,7 @@ func ScanForJunk() []ScannerResult {
 }
 
 type scanner interface {
-	scan() []ScannerResult
+	scan() []ScanResult
 }
 
 var homeDir = func() string {
@@ -80,6 +81,12 @@ var homeDir = func() string {
 	return homeDir
 }()
 
+const (
+	size10M = 10 * 1024 * 1024
+	size1M  = 1024 * 1024
+	size1K  = 1024
+)
+
 var (
 	cacheScanner = pathScannerWithFilter{
 		paths: []string{
@@ -87,7 +94,7 @@ var (
 			filepath.Join(homeDir, ".cache"),
 		},
 		filters: []filter{
-			sizeFilter(10 * 1024), // 10M+
+			sizeFilter(size10M),
 		},
 		reason: Cache,
 	}
@@ -97,7 +104,7 @@ var (
 			filepath.Join(homeDir, "Library", "Logs"),
 		},
 		filters: []filter{
-			sizeFilter(10 * 1024), // 10M+
+			sizeFilter(size1M),
 		},
 		reason: Log,
 	}
@@ -108,7 +115,7 @@ var (
 			"/private/var/tmp/",
 		},
 		filters: []filter{
-			sizeFilter(10 * 1024), // 10M+
+			sizeFilter(size1M),
 		},
 		reason: Temp,
 	}
@@ -121,6 +128,7 @@ var (
 			filepath.Join(homeDir, "Library", "Preferences"),
 		},
 		filters: []filter{
+			sizeFilter(size1K),
 			prefixExclusionFilter("com.apple."), // Exclude apple built-in apps
 			deletedAppDataFilter(),              // Only keep app data of deleted apps
 		},
@@ -151,7 +159,7 @@ var (
 			filepath.Join(homeDir, "Library", "Developer", "Xcode", "DocumentationIndex"),
 		},
 		filters: []filter{
-			sizeFilter(1 * 1024), // 1M+
+			sizeFilter(size1M),
 		},
 		reason: XcodeCache,
 	}
@@ -161,13 +169,13 @@ var (
 			filepath.Join(homeDir, "Library", "Developer", "CoreSimulator", "Devices"),
 		},
 		filters: []filter{
-			sizeFilter(1 * 1024), // 1M+
+			sizeFilter(size1M),
 		},
 		reason: XcodeSimulator,
 	}
 )
 
-type filter func(ScannerResult) bool
+type filter func(ScanResult) bool
 
 type pathScannerWithFilter struct {
 	paths   []string
@@ -175,14 +183,14 @@ type pathScannerWithFilter struct {
 	reason  Reason
 }
 
-func sizeFilter(size int64) filter {
-	return func(s ScannerResult) bool {
-		return s.SizeKbs >= size
+func sizeFilter(size uint64) filter {
+	return func(s ScanResult) bool {
+		return s.Size >= size
 	}
 }
 
 func prefixExclusionFilter(prefix string) filter {
-	return func(s ScannerResult) bool {
+	return func(s ScanResult) bool {
 		return !strings.HasPrefix(filepath.Base(s.Path), prefix)
 	}
 }
@@ -190,7 +198,7 @@ func prefixExclusionFilter(prefix string) filter {
 // Returns true if the ScannerResult belongs to a deleted app
 func deletedAppDataFilter() filter {
 	apps := getInstalledApps()
-	return func(s ScannerResult) bool {
+	return func(s ScanResult) bool {
 		for _, app := range apps {
 			if strings.Contains(filepath.Base(s.Path), app) {
 				return false
@@ -225,10 +233,10 @@ func getInstalledApps() []string {
 	return apps
 }
 
-func (s *pathScannerWithFilter) scan() []ScannerResult {
-	var results []ScannerResult
+func (s *pathScannerWithFilter) scan() []ScanResult {
+	var results []ScanResult
 	var wg sync.WaitGroup
-	ch := make(chan ScannerResult)
+	ch := make(chan ScanResult)
 
 	for _, p := range s.paths {
 		wg.Add(1)
@@ -260,25 +268,25 @@ func (s *pathScannerWithFilter) scan() []ScannerResult {
 	return results
 }
 
-func (s *pathScannerWithFilter) processEntry(path string) *ScannerResult {
+func (s *pathScannerWithFilter) processEntry(path string) *ScanResult {
 	info, err := os.Stat(path)
 	if err != nil {
 		log.Printf("failed to stat path %s: %v", path, err)
 		return nil
 	}
 
-	var sizeKbs int64
+	var size uint64
 	if info.IsDir() {
-		sizeKbs = fetchDirSize(path)
+		size = fetchDirSize(path)
 	} else if info.Mode().IsRegular() {
-		sizeKbs = info.Size() / 1024
+		size = uint64(info.Size())
 	} else {
 		return nil
 	}
 
-	r := ScannerResult{
+	r := ScanResult{
 		Path:         path,
-		SizeKbs:      sizeKbs,
+		Size:         size,
 		ModifiedDate: info.ModTime(),
 		Reason:       s.reason,
 	}
@@ -292,7 +300,7 @@ func (s *pathScannerWithFilter) processEntry(path string) *ScannerResult {
 }
 
 // Fetch dir size using `du`, which is faster than filepath.WalkDir()
-func fetchDirSize(path string) int64 {
+func fetchDirSize(path string) uint64 {
 	// -k: output in KB
 	// -s: output the total size
 	args := []string{"-k", "-s"}
@@ -303,8 +311,8 @@ func fetchDirSize(path string) int64 {
 	if err == nil {
 		fields := strings.Fields(string(output))
 		if len(fields) == 2 {
-			size, _ := strconv.ParseInt(fields[0], 10, 64)
-			return size
+			size, _ := strconv.ParseUint(fields[0], 10, 64)
+			return size * 1024
 		}
 	}
 	return 0
