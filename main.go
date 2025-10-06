@@ -1,11 +1,12 @@
 package main
 
 import (
-	"broomie/internal/model"
 	_ "embed"
 	"fmt"
 	"log"
 	"os"
+
+	"broomie/internal/model"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/pflag"

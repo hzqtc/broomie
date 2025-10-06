@@ -34,7 +34,7 @@ type ScanResult struct {
 	Reason       Reason
 }
 
-func ScanForJunk() []ScanResult {
+func ScanForJunk() []*ScanResult {
 	scanners := []scanner{
 		&cacheScanner,
 		&logScanner,
@@ -45,9 +45,9 @@ func ScanForJunk() []ScanResult {
 		&xcodeCacheScanner,
 		&xcodeSimulatorScanner,
 	}
-	results := []ScanResult{}
+	results := []*ScanResult{}
 	var wg sync.WaitGroup
-	ch := make(chan []ScanResult)
+	ch := make(chan []*ScanResult)
 
 	for _, s := range scanners {
 		wg.Add(1)
@@ -70,7 +70,7 @@ func ScanForJunk() []ScanResult {
 }
 
 type scanner interface {
-	scan() []ScanResult
+	scan() []*ScanResult
 }
 
 var homeDir = func() string {
@@ -175,7 +175,7 @@ var (
 	}
 )
 
-type filter func(ScanResult) bool
+type filter func(*ScanResult) bool
 
 type pathScannerWithFilter struct {
 	paths   []string
@@ -184,13 +184,13 @@ type pathScannerWithFilter struct {
 }
 
 func sizeFilter(size uint64) filter {
-	return func(s ScanResult) bool {
+	return func(s *ScanResult) bool {
 		return s.Size >= size
 	}
 }
 
 func prefixExclusionFilter(prefix string) filter {
-	return func(s ScanResult) bool {
+	return func(s *ScanResult) bool {
 		return !strings.HasPrefix(filepath.Base(s.Path), prefix)
 	}
 }
@@ -198,7 +198,7 @@ func prefixExclusionFilter(prefix string) filter {
 // Returns true if the ScannerResult belongs to a deleted app
 func deletedAppDataFilter() filter {
 	apps := getInstalledApps()
-	return func(s ScanResult) bool {
+	return func(s *ScanResult) bool {
 		for _, app := range apps {
 			if strings.Contains(filepath.Base(s.Path), app) {
 				return false
@@ -233,10 +233,10 @@ func getInstalledApps() []string {
 	return apps
 }
 
-func (s *pathScannerWithFilter) scan() []ScanResult {
-	var results []ScanResult
+func (s *pathScannerWithFilter) scan() []*ScanResult {
+	var results []*ScanResult
 	var wg sync.WaitGroup
-	ch := make(chan ScanResult)
+	ch := make(chan *ScanResult)
 
 	for _, p := range s.paths {
 		wg.Add(1)
@@ -250,7 +250,7 @@ func (s *pathScannerWithFilter) scan() []ScanResult {
 
 			for _, entry := range entries {
 				if r := s.processEntry(filepath.Join(p, entry.Name())); r != nil {
-					ch <- *r
+					ch <- r
 				}
 			}
 		}(p)
@@ -292,7 +292,7 @@ func (s *pathScannerWithFilter) processEntry(path string) *ScanResult {
 	}
 
 	for _, filter := range s.filters {
-		if !filter(r) {
+		if !filter(&r) {
 			return nil
 		}
 	}
