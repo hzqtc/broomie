@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -247,9 +248,10 @@ func (s *pathScannerWithFilter) scan() []*ScanResult {
 				log.Printf("failed to read dir %s: %v", p, err)
 				return
 			}
+			sizes := fetchSubDirSizes(p)
 
 			for _, entry := range entries {
-				if r := s.processEntry(filepath.Join(p, entry.Name())); r != nil {
+				if r := s.processEntry(filepath.Join(p, entry.Name()), sizes[entry.Name()]); r != nil {
 					ch <- r
 				}
 			}
@@ -268,7 +270,7 @@ func (s *pathScannerWithFilter) scan() []*ScanResult {
 	return results
 }
 
-func (s *pathScannerWithFilter) processEntry(path string) *ScanResult {
+func (s *pathScannerWithFilter) processEntry(path string, dirSize uint64) *ScanResult {
 	info, err := os.Stat(path)
 	if err != nil {
 		log.Printf("failed to stat path %s: %v", path, err)
@@ -277,7 +279,7 @@ func (s *pathScannerWithFilter) processEntry(path string) *ScanResult {
 
 	var size uint64
 	if info.IsDir() {
-		size = fetchDirSize(path)
+		size = dirSize
 	} else if info.Mode().IsRegular() {
 		size = uint64(info.Size())
 	} else {
@@ -299,21 +301,36 @@ func (s *pathScannerWithFilter) processEntry(path string) *ScanResult {
 	return &r
 }
 
-// Fetch dir size using `du`, which is faster than filepath.WalkDir()
-func fetchDirSize(path string) uint64 {
+// Fetch subdir sizes using `du`, which is faster than filepath.WalkDir()
+func fetchSubDirSizes(path string) map[string]uint64 {
+	sizes := make(map[string]uint64)
 	// -k: output in KB
 	// -s: output the total size
-	args := []string{"-k", "-s"}
+	// -d 1: depth = 1 -> sub directories
+	args := []string{"-k", "-d1"}
 	args = append(args, path)
 	cmd := exec.Command("du", args...)
 	output, err := cmd.Output()
 
-	if err == nil {
-		fields := strings.Fields(string(output))
-		if len(fields) == 2 {
-			size, _ := strconv.ParseUint(fields[0], 10, 64)
-			return size * 1024
+	if err != nil {
+		log.Printf("failed to get size for %s: %v", path, err)
+		return sizes
+	}
+
+	re := regexp.MustCompile(`(\d+)\s+(.+)`)
+	for line := range strings.SplitSeq(string(output), "\n") {
+		matches := re.FindStringSubmatch(line)
+		if len(matches) != 3 {
+			continue
+		}
+		size := matches[1]
+		fullPath := matches[2]
+
+		if entry, found := strings.CutPrefix(fullPath, path); found && len(entry) > 0 {
+			entry = strings.TrimPrefix(entry, string(os.PathSeparator))
+			sizes[entry], _ = strconv.ParseUint(size, 10, 64)
+			sizes[entry] *= 1024 // kb to b
 		}
 	}
-	return 0
+	return sizes
 }
