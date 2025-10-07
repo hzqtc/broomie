@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"broomie/internal/model"
 
@@ -44,8 +45,10 @@ func main() {
 
 	// The WithAltScreen() option provides a full-screen TUI experience.
 	p := tea.NewProgram(model.InitialModel(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	if m, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
+	} else if appModel, ok := m.(model.Model); ok {
+		fmt.Printf("%s\n", strings.Join(appModel.Output, "\n"))
 	}
 }

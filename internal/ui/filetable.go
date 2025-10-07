@@ -57,6 +57,8 @@ type FileTableModel struct {
 	sortNext       key.Binding
 	sortPrev       key.Binding
 	toggleSortDir  key.Binding
+	selectAll      key.Binding
+	unselectAll    key.Binding
 	toggleSelected key.Binding
 }
 
@@ -71,6 +73,8 @@ func NewFileTableModel() FileTableModel {
 		sortNext:       key.NewBinding(key.WithKeys("s")),
 		sortPrev:       key.NewBinding(key.WithKeys("S")),
 		toggleSortDir:  key.NewBinding(key.WithKeys("r")),
+		selectAll:      key.NewBinding(key.WithKeys("a")),
+		unselectAll:    key.NewBinding(key.WithKeys("A")),
 		toggleSelected: key.NewBinding(key.WithKeys(" ")),
 	}
 	m.updateColumns()
@@ -109,6 +113,16 @@ func (m FileTableModel) Update(msg tea.Msg) (FileTableModel, tea.Cmd) {
 			// Needs to update column because sorting indicator changed
 			m.updateColumns()
 			m.sortRows()
+		case key.Matches(msg, m.selectAll):
+			for _, s := range m.results {
+				s.Selected = true
+			}
+			m.UpdateRows()
+		case key.Matches(msg, m.unselectAll):
+			for _, s := range m.results {
+				s.Selected = false
+			}
+			m.UpdateRows()
 		case key.Matches(msg, m.toggleSelected):
 			cursor := m.table.Cursor()
 			if cursor >= 0 && cursor < len(m.results) {
