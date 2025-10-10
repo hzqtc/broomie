@@ -35,7 +35,7 @@ type ScanResult struct {
 	Reason       Reason
 }
 
-func ScanForJunk() []*ScanResult {
+func ScanForJunk(progress *ScanProgress) []*ScanResult {
 	scanners := []scanner{
 		&cacheScanner,
 		&logScanner,
@@ -46,6 +46,15 @@ func ScanForJunk() []*ScanResult {
 		&xcodeCacheScanner,
 		&xcodeSimulatorScanner,
 	}
+	progress.AddTask(&cacheScanner, "System & application cache")
+	progress.AddTask(&logScanner, "System & application logs")
+	progress.AddTask(&tempScanner, "Temporary files")
+	progress.AddTask(&deletedAppDataScanner, "Deleted application left over data")
+	progress.AddTask(&leftOverUpdateDataScanner, "Left over system updates")
+	progress.AddTask(&iphoneBackupScanner, "iPhone backup")
+	progress.AddTask(&xcodeCacheScanner, "XCode derived data & cache")
+	progress.AddTask(&xcodeSimulatorScanner, "XCode simulator")
+
 	results := []*ScanResult{}
 	var wg sync.WaitGroup
 	ch := make(chan []*ScanResult)
@@ -55,6 +64,7 @@ func ScanForJunk() []*ScanResult {
 		go func(s scanner) {
 			defer wg.Done()
 			ch <- s.scan()
+			progress.CompleteTask(s)
 		}(s)
 	}
 
