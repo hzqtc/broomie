@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type scanCompleteMsg struct {
@@ -17,10 +18,11 @@ type Model struct {
 	Output  []string
 	results []*scanner.ScanResult
 
-	width   int
-	height  int
-	table   ui.FileTableModel
-	loading ui.LoadingModel
+	width     int
+	height    int
+	table     ui.FileTableModel
+	selection ui.InfoPanelModel
+	loading   ui.LoadingModel
 
 	refresh      key.Binding
 	quit         key.Binding
@@ -30,6 +32,7 @@ type Model struct {
 func InitialModel() Model {
 	return Model{
 		table:        ui.NewFileTableModel(),
+		selection:    ui.NewInfoPanelModel(),
 		loading:      ui.NewLoadingModel(),
 		refresh:      key.NewBinding(key.WithKeys("R")),
 		quit:         key.NewBinding(key.WithKeys("q")),
@@ -56,7 +59,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.table.SetDimensions(m.width-2, m.height-2)
+		m.table.SetDimensions(m.width-2, m.height-2-lipgloss.Height(m.selection.View()))
 
 	case spinner.TickMsg:
 		m.loading, cmd = m.loading.Update(msg)
@@ -78,6 +81,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		default:
 			m.table, cmd = m.table.Update(msg)
+			m.selection.SetSelection(m.table.SelectedResults())
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -89,5 +93,5 @@ func (m Model) View() string {
 	if loading := m.loading.View(); loading != "" {
 		return loading
 	}
-	return m.table.View()
+	return lipgloss.JoinVertical(lipgloss.Left, m.table.View(), m.selection.View())
 }
