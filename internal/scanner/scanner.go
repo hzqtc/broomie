@@ -106,6 +106,7 @@ var (
 		},
 		filters: []filter{
 			sizeFilter(size10M),
+			prefixExclusionFilter("com.apple."), // Exclude apple built-in apps
 		},
 		reason: Cache,
 	}
