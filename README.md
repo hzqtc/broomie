@@ -33,7 +33,7 @@
   - Real-time calculations of selected folders and how much disk space will be reclaimed.
 - **🔌 Scripting-Friendly Pipeline**: Can terminate and print selected paths to standard output (`stdout`), allowing seamless integration with custom deletion scripts or commands.
 
-![](https://raw.github.com/hzqtc/taproom/master/screenshot.png)
+![](https://raw.github.com/hzqtc/broomie/master/screenshot.png)
 
 ---
 
